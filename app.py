@@ -20,7 +20,7 @@ st.set_page_config(
 DB_FILE = "library_scholarship.db"
 CONFIG_FILE = "library_score_config.json"
 ALLOWED_DOMAIN = "@pukyong.ac.kr"
-ADMIN_PASSWORD = "admin1234"  # 관리자 비밀번호 (운영 시 변경 권장)
+ADMIN_PASSWORD = "admin1234"  # 관리자 비밀번호 (운영 시 변경 가능)
 
 # ==================== 이메일(SMTP) 설정 ====================
 SMTP_ENABLED = True
@@ -36,6 +36,65 @@ st.markdown("""
     .stApp {
         background-color: #F4F7FB;
         font-family: 'Pretendard', '맑은 고딕', sans-serif;
+    }
+
+    /* 사이드바 배경 및 접속화면 선택 메뉴 가시성 대폭 강화 */
+    section[data-testid="stSidebar"] {
+        background-color: #FFFFFF;
+        border-right: 2px solid #E2E8F0;
+    }
+    .sidebar-menu-box {
+        background: linear-gradient(135deg, #003876 0%, #005BAC 100%);
+        color: #FFFFFF;
+        padding: 16px 18px;
+        border-radius: 14px;
+        margin-bottom: 14px;
+        box-shadow: 0 6px 16px rgba(0, 56, 118, 0.15);
+    }
+    .sidebar-menu-title {
+        font-size: 17px;
+        font-weight: 800;
+        margin: 0;
+        color: #FFFFFF;
+        letter-spacing: -0.3px;
+    }
+    .sidebar-menu-desc {
+        font-size: 12px;
+        color: #DCEBFA;
+        margin-top: 4px;
+    }
+
+    /* 사이드바 라디오 버튼을 큼직한 카드형 버튼처럼 스타일링 */
+    section[data-testid="stSidebar"] div[role="radiogroup"] {
+        gap: 10px !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+        background-color: #F1F5F9 !important;
+        border: 2px solid #CBD5E1 !important;
+        border-radius: 12px !important;
+        padding: 14px 16px !important;
+        width: 100% !important;
+        transition: all 0.2s ease !important;
+        cursor: pointer !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+        border-color: #005BAC !important;
+        background-color: #EBF3FC !important;
+        transform: translateY(-1px);
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label[data-checked="true"],
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
+        background: linear-gradient(90deg, #003876 0%, #005BAC 100%) !important;
+        border-color: #003876 !important;
+        box-shadow: 0 4px 12px rgba(0, 56, 118, 0.22) !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label p {
+        font-size: 15.5px !important;
+        font-weight: 800 !important;
+        color: #1E293B !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p {
+        color: #FFFFFF !important;
     }
 
     /* 상단 PKNU 히어로 배너 */
@@ -61,17 +120,6 @@ st.markdown("""
         font-size: 14px;
         color: #DCEBFA;
         margin-top: 6px;
-    }
-    .pknu-watermark {
-        background: rgba(255, 255, 255, 0.14);
-        backdrop-filter: blur(6px);
-        padding: 8px 16px;
-        border-radius: 999px;
-        font-size: 13px;
-        font-weight: 700;
-        color: #FFFFFF;
-        border: 1px solid rgba(255, 255, 255, 0.28);
-        white-space: nowrap;
     }
 
     /* 핵심 KPI 요약 카드 4종 */
@@ -189,6 +237,48 @@ st.markdown("""
         font-size: 20px;
         font-weight: 800;
         color: #003876;
+    }
+
+    /* 웹페이지 하단 공식 푸터(Footer) */
+    .pknu-footer {
+        margin-top: 64px;
+        padding: 28px 32px;
+        background-color: #1E293B;
+        color: #CBD5E1;
+        border-radius: 14px;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+    .pknu-footer-links {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #334155;
+        flex-wrap: wrap;
+    }
+    .pknu-footer-links a {
+        color: #FFFFFF !important;
+        font-weight: 700;
+        text-decoration: none;
+        font-size: 13.5px;
+    }
+    .pknu-footer-links a.privacy-link {
+        color: #38BDF8 !important;
+        font-weight: 800;
+    }
+    .pknu-footer-links a:hover {
+        text-decoration: underline;
+    }
+    .pknu-footer-info {
+        color: #94A3B8;
+        font-size: 12.5px;
+    }
+    .pknu-footer-copy {
+        color: #64748B;
+        font-size: 12px;
+        margin-top: 4px;
+        font-weight: 600;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -324,6 +414,23 @@ def render_item_card(title, raw_text, score, cap):
     </div>
     """, unsafe_allow_html=True)
 
+def render_footer():
+    st.markdown("""
+    <div class="pknu-footer">
+        <div class="pknu-footer-links">
+            <a href="https://www.pknu.ac.kr/main/168" target="_blank" class="privacy-link">개인정보처리방침</a>
+            <span style="color:#475569;">|</span>
+            <a href="https://libweb.pknu.ac.kr/nospam/" target="_blank">이메일무단수집금지</a>
+        </div>
+        <div class="pknu-footer-info">
+            48513 부산광역시 남구 용소로 45(대연동) &nbsp;|&nbsp; FAX: 051-629-6917
+        </div>
+        <div class="pknu-footer-copy">
+            COPYRIGHT(C) 2016 PUKYONG NATIONAL UNIVERSITY LIBRARY. ALL RIGHTS RESERVED.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
 init_db()
 
 # ==================== 상단 국립부경대 시그니처 히어로 배너 ====================
@@ -333,22 +440,36 @@ st.markdown("""
         <div class="pknu-hero-title">🐋 국립부경대학교 도서관 장학사업 실시간 점수 조회 포털</div>
         <div class="pknu-hero-sub">PKNU Library Mileage & Scholarship Dashboard | 나의 독서·문화·학습 활동 마일리지 및 실시간 순위 분석</div>
     </div>
-    <div class="pknu-watermark">도서관 권혁일, 2026.11.04.</div>
 </div>
 """, unsafe_allow_html=True)
 
-# 사이드바 네비게이션
+# ==================== 사이드바 네비게이션 (가시성 강화 & 명칭 변경) ====================
 with st.sidebar:
-    st.markdown("### 🐋 PKNU 도서관 포털")
-    page_mode = st.radio(
-        "접속 화면 선택",
-        ["🎓 이용자 대시보드 (학생용)", "🔒 관리자 백엔드 (담당자용)"]
-    )
-    st.markdown("---")
-    st.caption("🏆 **수상 기준 요약 (총 38명)**\n- 1위(최우수 1명): 100만 원\n- 2~3위(우수 2명): 80만 원\n- 4~8위(우량 5명): 50만 원\n- 9~17위(장려 9명): 40만 원\n- 18~38위(장려 21명): 30만 원")
+    st.markdown("""
+    <div class="sidebar-menu-box">
+        <div class="sidebar-menu-title">🧭 접속 화면 선택</div>
+        <div class="sidebar-menu-desc">원하시는 서비스 메뉴를 선택하세요</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# ==================== 1. 이용자 대시보드 (학생용) ====================
-if page_mode == "🎓 이용자 대시보드 (학생용)":
+    page_mode = st.radio(
+        "접속 화면 선택 메뉴",
+        ["🎓 본인 점수 확인(학생용)", "⚙️ 관리자페이지"],
+        label_visibility="collapsed"
+    )
+
+    st.markdown("---")
+    st.markdown("#### 🏆 수상 기준 요약 (총 38명)")
+    st.caption(
+        "- **1위 (최우수 1명):** 1,000,000원\n"
+        "- **2~3위 (우수 2명):** 800,000원\n"
+        "- **4~8위 (우량 5명):** 500,000원\n"
+        "- **9~17위 (장려 9명):** 400,000원\n"
+        "- **18~38위 (장려 21명):** 300,000원"
+    )
+
+# ==================== 1. 본인 점수 확인(학생용) ====================
+if page_mode == "🎓 본인 점수 확인(학생용)":
     if "logged_in_user" not in st.session_state:
         st.session_state.logged_in_user = None
 
@@ -463,214 +584,3 @@ if page_mode == "🎓 이용자 대시보드 (학생용)":
                 with st.expander("📋 기존 표(Table) 형태로 전체 데이터 구조 한눈에 보기"):
                     detail_df = pd.DataFrame([
                         {"평가 항목": "1. 단행본대출", "내 실적": f"{int(user_row['단행본(권수)'])} 권", "환산 점수": user_row["단행본(점수)"], "최대 상한(Cap)": 100},
-                        {"평가 항목": "2. 전자책대출", "내 실적": f"{int(user_row['전자책(권수)'])} 권", "환산 점수": user_row["전자책(점수)"], "최대 상한(Cap)": 100},
-                        {"평가 항목": "3. 문화행사 참여", "내 실적": f"{int(user_row['문화행사(횟수)'])} 회", "환산 점수": user_row["문화행사(점수)"], "최대 상한(Cap)": 100},
-                        {"평가 항목": "4. 이용교육 참여", "내 실적": f"대면 {int(user_row['이용교육_대면(횟수)'])} / 비대면 {int(user_row['이용교육_비대면(횟수)'])}", "환산 점수": user_row["이용교육(점수)"], "최대 상한(Cap)": 100},
-                        {"평가 항목": "5. 만족도조사", "내 실적": f"{int(user_row['만족도조사(횟수)'])} 회", "환산 점수": user_row["만족도조사(점수)"], "최대 상한(Cap)": 100},
-                        {"평가 항목": "6. 시설이용(VR/스튜디오)", "내 실적": f"{int(user_row['시설이용(횟수)'])} 회", "환산 점수": user_row["시설이용(점수)"], "최대 상한(Cap)": 10},
-                        {"평가 항목": "7. 독서클럽", "내 실적": user_row["독서클럽(등급)"], "환산 점수": user_row["독서클럽(점수)"], "최대 상한(Cap)": 70},
-                        {"평가 항목": "8. 북트레일러", "내 실적": user_row["북트레일러(등급)"], "환산 점수": user_row["북트레일러(점수)"], "최대 상한(Cap)": 25},
-                        {"평가 항목": "9. 독서감상문", "내 실적": f"총 {int(user_row['독서감상문_전체(편수)'])}편 (권장 {int(user_row['독서감상문_권장(편수)'])}편)", "환산 점수": user_row["독서감상문(점수)"], "최대 상한(Cap)": 130},
-                        {"평가 항목": "10. 도서관SNS서포터즈", "내 실적": user_row["SNS서포터즈(내역)"], "환산 점수": user_row["SNS서포터즈(점수)"], "최대 상한(Cap)": 100},
-                    ])
-                    st.dataframe(
-                        detail_df,
-                        column_config={
-                            "환산 점수": st.column_config.ProgressColumn(
-                                "환산 점수 (상한 대비)",
-                                format="%f 점",
-                                min_value=0,
-                                max_value=130,
-                            )
-                        },
-                        hide_index=True,
-                        use_container_width=True
-                    )
-
-    else:
-        auth_tab1, auth_tab2 = st.tabs(["🔑 학번 로그인", "🛡️ 국립부경대 웹메일(@pukyong.ac.kr) 인증 회원가입"])
-
-        with auth_tab1:
-            c_login1, c_login2, c_login3 = st.columns([1, 2, 1])
-            with c_login2:
-                st.markdown("#### 🔑 학번 로그인")
-                with st.form("login_form"):
-                    login_id = st.text_input("학번 (이용자ID)", placeholder="예: 20261001")
-                    login_pw = st.text_input("비밀번호", type="password")
-                    login_submit = st.form_submit_button("로그인하여 내 대시보드 열기", type="primary", use_container_width=True)
-
-                if login_submit:
-                    user_info = verify_login(login_id, login_pw)
-                    if user_info:
-                        st.session_state.logged_in_user = user_info
-                        st.rerun()
-                    else:
-                        st.error("학번 또는 비밀번호가 일치하지 않습니다.")
-
-        with auth_tab2:
-            st.markdown("#### 🛡️ 교내 웹메일(@pukyong.ac.kr) 본인 확인 회원가입")
-            st.info("입력하신 **[학번 + 성명]**이 도서관 장학사업 집계 명단과 일치해야만 교내 웹메일로 인증번호가 발송됩니다.")
-
-            if "otp_code" not in st.session_state:
-                st.session_state.otp_code = None
-                st.session_state.verified_info = None
-                st.session_state.email_verified = False
-
-            c_r1, c_r2, c_r3 = st.columns(3)
-            with c_r1:
-                reg_id = st.text_input("1. 본인 학번", placeholder="예: 20261001")
-            with c_r2:
-                reg_name = st.text_input("2. 본인 성명", placeholder="예: 홍길동")
-            with c_r3:
-                reg_email = st.text_input("3. 교내 웹메일", placeholder="example@pukyong.ac.kr")
-
-            if st.button("📨 실명 확인 및 웹메일 인증번호 발송", use_container_width=True):
-                ok_id, msg_id = verify_student_identity_before_otp(reg_id, reg_name, reg_email)
-                if not ok_id:
-                    st.error(msg_id)
-                else:
-                    code = str(random.randint(100000, 999999))
-                    st.session_state.otp_code = code
-                    st.session_state.verified_info = (reg_id.strip(), reg_name.strip(), reg_email.strip().lower())
-                    st.session_state.email_verified = False
-                    ok_mail, msg_mail = send_verification_email(reg_email.strip().lower(), code)
-                    if ok_mail:
-                        st.success(msg_mail)
-                    else:
-                        st.error(msg_mail)
-
-            if st.session_state.otp_code and not st.session_state.email_verified:
-                c_v1, c_v2 = st.columns([3, 1])
-                with c_v1:
-                    input_otp = st.text_input("웹메일로 수신한 6자리 인증번호 입력", max_chars=6)
-                with c_v2:
-                    st.write("")
-                    st.write("")
-                    if st.button("✔️ 인증번호 확인", use_container_width=True):
-                        if input_otp.strip() == st.session_state.otp_code:
-                            st.session_state.email_verified = True
-                            st.success("✅ 본인 인증 완료! 아래 비밀번호를 설정해 주세요.")
-                        else:
-                            st.error("인증번호가 일치하지 않습니다.")
-
-            if st.session_state.email_verified and st.session_state.verified_info:
-                v_id, v_name, v_email = st.session_state.verified_info
-                st.markdown("---")
-                st.write(f"🔒 **인증 완료 계정:** 학번 `{v_id}` | 성명 `{v_name}` | 웹메일 `{v_email}`")
-                with st.form("final_reg_form"):
-                    reg_pw = st.text_input("사용할 비밀번호 입력", type="password")
-                    reg_pw_chk = st.text_input("비밀번호 재입력", type="password")
-                    reg_submit = st.form_submit_button("🎉 회원가입 완료", type="primary", use_container_width=True)
-
-                if reg_submit:
-                    if not reg_pw or reg_pw != reg_pw_chk:
-                        st.error("비밀번호가 비어있거나 서로 일치하지 않습니다.")
-                    else:
-                        ok, msg = register_member(v_id, v_name, v_email, reg_pw)
-                        if ok:
-                            st.success(msg)
-                            st.session_state.otp_code = None
-                            st.session_state.email_verified = False
-                        else:
-                            st.error(msg)
-
-# ==================== 2. 관리자 백엔드 (담당자 전용) ====================
-elif page_mode == "🔒 관리자 백엔드 (담당자 전용)":
-    if "admin_logged_in" not in st.session_state:
-        st.session_state.admin_logged_in = False
-
-    if not st.session_state.admin_logged_in:
-        pwd = st.text_input("관리자 비밀번호를 입력하세요", type="password")
-        if st.button("관리자 로그인", type="primary"):
-            if pwd == ADMIN_PASSWORD:
-                st.session_state.admin_logged_in = True
-                st.rerun()
-            else:
-                st.error("비밀번호가 올바르지 않습니다.")
-        st.stop()
-
-    st.info("🛡️ 해당 프로그램은 '2026년 장학사업 계획'에 의거하여 만들어진 프로그램으로 최종 결과물에 대한 검수와 책임은 사용자(담당자)에게 있음을 확인합니다.")
-
-    df_saved = load_results_from_db()
-    conn = sqlite3.connect(DB_FILE)
-    df_members = pd.read_sql("SELECT student_id AS 학번, name AS 성명, email AS 인증웹메일, created_at AS 가입일시 FROM members", conn)
-    conn.close()
-
-    if not df_saved.empty:
-        total_cnt = len(df_saved)
-        avg_scr = float(df_saved["최종 총점"].mean())
-        max_scr = float(df_saved["최종 총점"].max())
-        total_prize = int(df_saved["지급금액"].sum())
-
-        a1, a2, a3, a4 = st.columns(4)
-        with a1:
-            st.markdown(f'<div class="kpi-card"><div class="kpi-label">총 집계 대상 인원</div><div class="kpi-value">{total_cnt:,} 명</div><div class="kpi-sub">웹포털 가입자: {len(df_members)}명</div></div>', unsafe_allow_html=True)
-        with a2:
-            st.markdown(f'<div class="kpi-card ocean"><div class="kpi-label">전체 평균 점수 / 최고점</div><div class="kpi-value">{avg_scr:.1f} 점</div><div class="kpi-sub">1위 최고점: {max_scr:.1f}점</div></div>', unsafe_allow_html=True)
-        with a3:
-            st.markdown(f'<div class="kpi-card gold"><div class="kpi-label">장학금 배정 인원</div><div class="kpi-value" style="color:#B45309;">{(df_saved["지급금액"] > 0).sum()} 명</div><div class="kpi-sub" style="color:#D97706;">기준: 1위 ~ 38위</div></div>', unsafe_allow_html=True)
-        with a4:
-            st.markdown(f'<div class="kpi-card teal"><div class="kpi-label">총 장학금 집행 예산</div><div class="kpi-value" style="color:#0F766E;">{total_prize:,} 원</div><div class="kpi-sub" style="color:#0D9488;">자동 산출 완료</div></div>', unsafe_allow_html=True)
-        st.write("")
-
-    t1, t2, t3 = st.tabs([
-        "⚡ 1. 로컬 실행파일(.exe) 결과 엑셀 간편 연동",
-        "📊 2. 실시간 순위 대시보드 및 게이지 표",
-        "👥 3. 가입 학생 계정 관리"
-    ])
-
-    with t1:
-        st.markdown("#### ⚡ 로컬 PC `도서관점수산정기.exe` 결과 파일 연동")
-        exe_excel = st.file_uploader("최종 결과 엑셀 파일(.xlsx) 업로드", type=["xlsx"])
-        if exe_excel and st.button("🚀 웹 조회 DB에 즉시 반영하기", type="primary", use_container_width=True):
-            try:
-                df_exe = pd.read_excel(exe_excel)
-                required_cols = ["이용자ID", "성명", "소속", "최종 총점", "순위", "수상등급", "지급금액"]
-                missing = [c for c in required_cols if c not in df_exe.columns]
-                if missing:
-                    st.error(f"올바른 집계표 파일이 아닙니다. 누락된 열: {missing}")
-                else:
-                    save_results_to_db(df_exe)
-                    st.success(f"✅ 연동 완료! 총 {len(df_exe)}명의 데이터가 웹 대시보드에 즉시 반영되었습니다.")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"오류 발생: {e}")
-
-    with t2:
-        if df_saved.empty:
-            st.info("반영된 점수 데이터가 없습니다.")
-        else:
-            st.markdown("#### 🏆 전체 이용자 순위 및 시각적 점수 게이지 표 (데이터 구조 100% 보존)")
-            max_total = max(float(df_saved["최종 총점"].max()), 100.0)
-            st.dataframe(
-                df_saved,
-                column_config={
-                    "순위": st.column_config.NumberColumn("🏆 순위", format="%d 위"),
-                    "최종 총점": st.column_config.ProgressColumn(
-                        "최종 총점 (시각화 게이지)",
-                        format="%.1f 점",
-                        min_value=0,
-                        max_value=max_total,
-                    ),
-                    "지급금액": st.column_config.NumberColumn("💰 지급 장학금", format="%d 원"),
-                    "단행본(점수)": st.column_config.ProgressColumn("단행본(점수)", format="%d", min_value=0, max_value=100),
-                    "전자책(점수)": st.column_config.ProgressColumn("전자책(점수)", format="%.1f", min_value=0, max_value=100),
-                    "독서감상문(점수)": st.column_config.ProgressColumn("독서감상문(점수)", format="%d", min_value=0, max_value=130),
-                },
-                hide_index=True,
-                use_container_width=True,
-                height=520
-            )
-
-    with t3:
-        st.markdown(f"#### 👥 가입 완료 학생 명단 (총 {len(df_members)}명)")
-        st.dataframe(df_members, use_container_width=True, hide_index=True)
-
-        del_id = st.text_input("초기화할 학생의 학번 입력")
-        if st.button("🗑️ 해당 학번 계정 초기화(삭제)"):
-            conn = sqlite3.connect(DB_FILE)
-            conn.execute("DELETE FROM members WHERE student_id = ?", (del_id.strip(),))
-            conn.commit()
-            conn.close()
-            st.success(f"학번 {del_id} 계정이 초기화되었습니다.")
-            st.rerun()
