@@ -707,7 +707,7 @@ elif page_mode == "⚙️ 관리자페이지":
             st.markdown("#### 🔒 관리자페이지 로그인")
             st.caption("담당자 전용 메뉴입니다. 관리자 비밀번호를 입력한 뒤 엔터(Enter) 또는 로그인 버튼을 눌러주세요.")
             with st.form("admin_login_form"):
-                pwd = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력 (기본값: admin1234)")
+                pwd = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력")
                 adm_submit = st.form_submit_button("🔑 관리자 로그인", type="primary", use_container_width=True)
 
             if adm_submit:
