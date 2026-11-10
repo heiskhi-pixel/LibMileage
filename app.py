@@ -19,7 +19,7 @@ st.set_page_config(
 
 DB_FILE = "library_scholarship.db"
 CONFIG_FILE = "library_score_config.json"
-ALLOWED_DOMAIN = "@pukyong.ac.kr"
+ALLOWED_DOMAIN = "@puknu.ac.kr"
 ADMIN_PASSWORD = "admin1234"  # 관리자 비밀번호 (운영 시 변경 가능)
 
 # ==================== 이메일(SMTP) 설정 ====================
