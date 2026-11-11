@@ -19,7 +19,8 @@ st.set_page_config(
 
 DB_FILE = "library_scholarship.db"
 CONFIG_FILE = "library_score_config.json"
-ALLOWED_DOMAIN = "@pukyung.ac.kr"
+ALLOWED_DOMAIN = "@pukyong.ac.kr"  # 화면 노출용 대표 도메인
+ALLOWED_DOMAINS = ("@pukyong.ac.kr", "@pknu.ac.kr")  # 실제 내부 허용 도메인 (비노출)
 ADMIN_PASSWORD = "admin1234"  # 관리자 비밀번호 (운영 시 변경 가능)
 
 # ==================== 이메일(SMTP) 설정 ====================
@@ -326,7 +327,8 @@ def verify_student_identity_before_otp(student_id, name, email):
     sname = name.strip()
     semail = email.strip().lower()
 
-    if not semail.endswith(ALLOWED_DOMAIN):
+    # 내부적으로는 @pukyong.ac.kr 과 @pknu.ac.kr 모두 허용하되, 안내 문구는 @pukyong.ac.kr 만 표기
+    if not semail.endswith(ALLOWED_DOMAINS):
         return False, f"반드시 '{ALLOWED_DOMAIN}'로 끝나는 국립부경대 웹메일만 사용할 수 있습니다."
 
     conn = sqlite3.connect(DB_FILE)
@@ -393,7 +395,7 @@ def send_verification_email(to_email, code):
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
-        return True, f"{to_email} 주소로 6자리 인증번호를 발송했습니다. 메일함을 확인해 주세요."
+        return True, "입력하신 교내 웹메일로 6자리 인증번호를 발송했습니다. 메일함을 확인해 주세요."
     except Exception as e:
         return False, f"이메일 발송 중 오류가 발생했습니다: {e}"
 
@@ -443,7 +445,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ==================== 사이드바 네비게이션 (가시성 강화 & 명칭 변경) ====================
+# ==================== 사이드바 네비게이션 ====================
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-menu-box">
@@ -477,7 +479,8 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
         u_id, u_name, u_email = st.session_state.logged_in_user
         top_c1, top_c2 = st.columns([5, 1])
         with top_c1:
-            st.markdown(f"#### 👋 반갑습니다, **{u_name}** (`{u_id}`) 님! &nbsp;|&nbsp; 📧 `{u_email}`")
+            # 가입한 이메일 주소(@pknu.ac.kr 등)는 화면에 노출하지 않고 학번과 성명만 표시
+            st.markdown(f"#### 👋 반갑습니다, **{u_name}** (`{u_id}`) 님!")
         with top_c2:
             if st.button("로그아웃", use_container_width=True):
                 st.session_state.logged_in_user = None
@@ -630,7 +633,7 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
 
         with auth_tab2:
             st.markdown("#### 🛡️ 교내 웹메일(@pukyong.ac.kr) 본인 확인 회원가입")
-            st.info("입력하신 **[학번 + 성명]**이 도서관 장학사업 집계 명단과 일치해야만 교내 웹메일로 인증번호가 발송됩니다.")
+            st.info("입력하신 **[학번 + 성명]**이 도서관 장학사업 집계 명단과 일치해야만 교내 웹메일(@pukyong.ac.kr)로 인증번호가 발송됩니다.")
 
             if "otp_code" not in st.session_state:
                 st.session_state.otp_code = None
@@ -643,7 +646,7 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
             with c_r2:
                 reg_name = st.text_input("2. 본인 성명", placeholder="예: 홍길동")
             with c_r3:
-                reg_email = st.text_input("3. 교내 웹메일", placeholder="example@pukyong.ac.kr")
+                reg_email = st.text_input("3. 교내 웹메일(@pukyong.ac.kr)", placeholder="example@pukyong.ac.kr")
 
             if st.button("📨 실명 확인 및 웹메일 인증번호 발송", use_container_width=True):
                 ok_id, msg_id = verify_student_identity_before_otp(reg_id, reg_name, reg_email)
@@ -677,7 +680,8 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
             if st.session_state.email_verified and st.session_state.verified_info:
                 v_id, v_name, v_email = st.session_state.verified_info
                 st.markdown("---")
-                st.write(f"🔒 **인증 완료 계정:** 학번 `{v_id}` | 성명 `{v_name}` | 웹메일 `{v_email}`")
+                # 가입 완료 단계에서도 이메일 주소는 화면에 노출하지 않고 학번과 성명만 표시
+                st.write(f"🔒 **인증 완료 계정:** 학번 `{v_id}` | 성명 `{v_name}`")
                 with st.form("final_reg_form"):
                     reg_pw = st.text_input("사용할 비밀번호 입력", type="password")
                     reg_pw_chk = st.text_input("비밀번호 재입력", type="password")
@@ -700,14 +704,13 @@ elif page_mode == "⚙️ 관리자페이지":
     if "admin_logged_in" not in st.session_state:
         st.session_state.admin_logged_in = False
 
-    # st.form 기반으로 엔터키 입력 및 버튼 클릭 시 세션 유실 없이 즉시 로그인 처리
     if not st.session_state.admin_logged_in:
         c_adm1, c_adm2, c_adm3 = st.columns([1, 2, 1])
         with c_adm2:
             st.markdown("#### 🔒 관리자페이지 로그인")
             st.caption("담당자 전용 메뉴입니다. 관리자 비밀번호를 입력한 뒤 엔터(Enter) 또는 로그인 버튼을 눌러주세요.")
             with st.form("admin_login_form"):
-                pwd = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력")
+                pwd = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력 (기본값: admin1234)")
                 adm_submit = st.form_submit_button("🔑 관리자 로그인", type="primary", use_container_width=True)
 
             if adm_submit:
