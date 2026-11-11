@@ -6,6 +6,8 @@ import hashlib
 import sqlite3
 import smtplib
 from email.mime.text import MIMEText
+from email.header import Header
+from email.utils import formataddr
 from datetime import datetime
 import streamlit as st
 import pandas as pd
@@ -21,14 +23,18 @@ DB_FILE = "library_scholarship.db"
 CONFIG_FILE = "library_score_config.json"
 ALLOWED_DOMAIN = "@pukyong.ac.kr"  # 화면 노출용 대표 도메인
 ALLOWED_DOMAINS = ("@pukyong.ac.kr", "@pknu.ac.kr")  # 실제 내부 허용 도메인 (비노출)
-ADMIN_PASSWORD = "admin1234"  # 관리자 비밀번호 (운영 시 변경 가능)
+
+# Streamlit Cloud의 Secrets 기능을 쓰거나 아래 변수에 직접 입력 가능
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin1234")
 
 # ==================== 이메일(SMTP) 설정 ====================
-SMTP_ENABLED = True
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USER = "library_sender@gmail.com"           # 도서관 대표 Gmail 주소
-SMTP_PASSWORD = "your_google_app_password_here"  # 구글 앱 비밀번호 16자리
+# [중요] 실제 발송을 위해 발신용 메일 주소와 비밀번호(구글 16자리 앱 비밀번호 또는 교내 메일 비밀번호)를 입력하세요.
+# Streamlit Cloud 대시보드의 App settings -> Secrets에 등록해 두면 GitHub에 비밀번호를 노출하지 않고 안전하게 쓸 수 있습니다.
+SMTP_ENABLED = st.secrets.get("SMTP_ENABLED", True)
+SMTP_SERVER = st.secrets.get("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(st.secrets.get("SMTP_PORT", 465))  # 465(SSL) 또는 587(TLS) 모두 자동 호환됨
+SMTP_USER = st.secrets.get("SMTP_USER", "library_sender@gmail.com")
+SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "your_google_app_password_here")
 
 # ==================== 국립부경대학교 전용 커스텀 CSS 테마 ====================
 st.markdown("""
@@ -379,25 +385,49 @@ def verify_login(student_id, password):
     return row
 
 def send_verification_email(to_email, code):
+    """Connection unexpectedly closed 방지를 위한 SSL(465) / STARTTLS(587) 이중 자동 전환 발송"""
     if not SMTP_ENABLED:
         return True, f"[테스트 모드] 인증번호 [{code}]를 입력해 주세요."
-    try:
-        msg = MIMEText(
-            f"안녕하세요.\n국립부경대학교 도서관 장학사업 실시간 점수 조회 포털 인증번호입니다.\n\n"
-            f"인증번호 6자리: [ {code} ]\n\n웹페이지로 돌아가 인증번호를 입력해 주세요.",
-            "plain", "utf-8"
-        )
-        msg["Subject"] = "[국립부경대 도서관] 장학사업 점수 조회 포털 웹메일 인증번호 안내"
-        msg["From"] = SMTP_USER
-        msg["To"] = to_email
 
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-        return True, "입력하신 교내 웹메일로 6자리 인증번호를 발송했습니다. 메일함을 확인해 주세요."
-    except Exception as e:
-        return False, f"이메일 발송 중 오류가 발생했습니다: {e}"
+    clean_user = SMTP_USER.strip()
+    clean_pw = SMTP_PASSWORD.replace(" ", "").strip()
+
+    if clean_user == "library_sender@gmail.com" or clean_pw == "your_google_app_password_here":
+        return False, "발신용 이메일(SMTP_USER) 및 앱 비밀번호(SMTP_PASSWORD)가 아직 설정되지 않았습니다."
+
+    msg = MIMEText(
+        f"안녕하세요.\n국립부경대학교 도서관 장학사업 실시간 점수 조회 포털 인증번호입니다.\n\n"
+        f"인증번호 6자리: [ {code} ]\n\n웹페이지로 돌아가 인증번호를 입력해 주세요.",
+        "plain", "utf-8"
+    )
+    msg["Subject"] = Header("[국립부경대 도서관] 장학사업 점수 조회 포털 웹메일 인증번호 안내", "utf-8")
+    msg["From"] = formataddr((str(Header("국립부경대 도서관", "utf-8")), clean_user))
+    msg["To"] = to_email
+
+    # 1순위 시도: SSL(465 포트) 또는 설정된 포트 우선 시도 후 실패 시 반대 방식으로 자동 재시도
+    methods = ["SSL_465", "STARTTLS_587"] if SMTP_PORT == 465 else ["STARTTLS_587", "SSL_465"]
+    last_error = ""
+
+    for method in methods:
+        try:
+            if method == "SSL_465":
+                with smtplib.SMTP_SSL(SMTP_SERVER, 465, timeout=15) as server:
+                    server.ehlo()
+                    server.login(clean_user, clean_pw)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(SMTP_SERVER, 587, timeout=15) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.ehlo()
+                    server.login(clean_user, clean_pw)
+                    server.send_message(msg)
+            return True, "입력하신 교내 웹메일로 6자리 인증번호를 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    return False, f"이메일 발송 중 오류가 발생했습니다: {last_error}"
 
 def render_item_card(title, raw_text, score, cap):
     score_val = float(score)
@@ -479,7 +509,6 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
         u_id, u_name, u_email = st.session_state.logged_in_user
         top_c1, top_c2 = st.columns([5, 1])
         with top_c1:
-            # 가입한 이메일 주소(@pknu.ac.kr 등)는 화면에 노출하지 않고 학번과 성명만 표시
             st.markdown(f"#### 👋 반갑습니다, **{u_name}** (`{u_id}`) 님!")
         with top_c2:
             if st.button("로그아웃", use_container_width=True):
@@ -680,7 +709,6 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
             if st.session_state.email_verified and st.session_state.verified_info:
                 v_id, v_name, v_email = st.session_state.verified_info
                 st.markdown("---")
-                # 가입 완료 단계에서도 이메일 주소는 화면에 노출하지 않고 학번과 성명만 표시
                 st.write(f"🔒 **인증 완료 계정:** 학번 `{v_id}` | 성명 `{v_name}`")
                 with st.form("final_reg_form"):
                     reg_pw = st.text_input("사용할 비밀번호 입력", type="password")
@@ -710,7 +738,7 @@ elif page_mode == "⚙️ 관리자페이지":
             st.markdown("#### 🔒 관리자페이지 로그인")
             st.caption("담당자 전용 메뉴입니다. 관리자 비밀번호를 입력한 뒤 엔터(Enter) 또는 로그인 버튼을 눌러주세요.")
             with st.form("admin_login_form"):
-                pwd = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력 (기본값: admin1234)")
+                pwd = st.text_input("관리자 비밀번호", type="password", placeholder="비밀번호를 입력하세요")
                 adm_submit = st.form_submit_button("🔑 관리자 로그인", type="primary", use_container_width=True)
 
             if adm_submit:
@@ -719,7 +747,7 @@ elif page_mode == "⚙️ 관리자페이지":
                     st.session_state.admin_logged_in = True
                     st.rerun()
                 else:
-                    st.error("비밀번호가 올바르지 않습니다. (기본 비밀번호는 admin1234 입니다)")
+                    st.error("비밀번호가 올바르지 않습니다.")
     else:
         top_adm1, top_adm2 = st.columns([5, 1])
         with top_adm1:
