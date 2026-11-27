@@ -7,6 +7,8 @@ import secrets
 import hashlib
 import sqlite3
 import smtplib
+import urllib.request
+import urllib.error
 from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
@@ -36,10 +38,14 @@ ALLOWED_DOMAIN = "@pukyong.ac.kr"  # 화면 노출용 대표 도메인
 ALLOWED_DOMAINS = ("@pukyong.ac.kr", "@pknu.ac.kr")  # 실제 내부 허용 도메인 (화면 비노출)
 ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD", "admin1234")  # 관리자 비밀번호
 
-# ==================== 이메일(SMTP) 발송 설정 ====================
-# Streamlit Cloud의 Secrets에 등록하면 GitHub에 비밀번호를 노출하지 않고 안전하게 발송할 수 있습니다.
-# Secrets를 사용하지 않을 경우에만 아래 두 줄의 따옴표 안을 실제 발신 계정과 16자리 앱 비밀번호로 수정하세요.
+# ==================== 이메일 발송 설정 ====================
+# [1순위 추천 - 방화벽 무관 HTTPS 발송] Google Apps Script 웹 앱 URL
+# Streamlit Cloud Secrets에 GAS_WEBHOOK_URL 을 등록하면 SMTP 포트 차단 없이 100% 발송됩니다.
 SMTP_ENABLED = get_secret("SMTP_ENABLED", True)
+GAS_WEBHOOK_URL = get_secret("GAS_WEBHOOK_URL", "")
+GAS_SECRET = get_secret("GAS_SECRET", "pknu_lib_2026_secret")
+
+# [2순위 백업 - 기존 SMTP 방식] GAS_WEBHOOK_URL이 비어 있을 때만 사용
 SMTP_SERVER = get_secret("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(get_secret("SMTP_PORT", 465))
 SMTP_USER = get_secret("SMTP_USER", "여기에_발신용_구글이메일_입력@gmail.com")
@@ -450,25 +456,48 @@ def verify_login(student_id, password):
     conn.close()
     return row
 
+def send_via_google_apps_script(to_email, subject, body):
+    """SMTP 포트 차단 우회: HTTPS(443)로 Google Apps Script 웹 앱을 호출해 Gmail 발송"""
+    webhook_url = str(GAS_WEBHOOK_URL).strip()
+    payload = json.dumps({
+        "secret": str(GAS_SECRET).strip(),
+        "to": to_email.strip(),
+        "subject": subject,
+        "body": body,
+        "sender_name": "국립부경대 도서관"
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        webhook_url,
+        data=payload,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST"
+    )
+    ctx = ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+            resp_text = resp.read().decode("utf-8", errors="ignore").strip()
+            try:
+                data = json.loads(resp_text)
+                if data.get("ok"):
+                    return True, "입력하신 교내 웹메일로 비밀번호 설정 메일(설정 링크 및 6자리 인증번호)을 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
+                return False, f"Google Apps Script 발송 거부: {data.get('error', resp_text)}"
+            except json.JSONDecodeError:
+                if resp.status == 200 and ("<html" not in resp_text.lower()):
+                    return True, "입력하신 교내 웹메일로 비밀번호 설정 메일(설정 링크 및 6자리 인증번호)을 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
+                return False, "Google Apps Script 웹 앱 접근 권한이 '모든 사용자(Anyone)'로 배포되었는지 확인해 주세요."
+    except urllib.error.HTTPError as e:
+        return False, f"Google Apps Script HTTP 오류 ({e.code}): 배포 URL과 권한(모든 사용자)을 확인해 주세요."
+    except Exception as e:
+        return False, f"Google Apps Script 연결 오류: {e}"
+
 def send_password_setup_email(to_email, name, token, otp_code, purpose="register"):
-    """SSL 컨텍스트 보강 및 465/587 상세 진단 로그 포함 메일 발송 함수"""
+    """1순위: Google Apps Script(HTTPS 443, 방화벽 무관) / 2순위: SMTP(465/587)"""
     base_url = APP_BASE_URL.rstrip("/")
     setup_link = f"{base_url}/?pw_token={token}"
 
     if not SMTP_ENABLED:
         return True, f"[테스트 모드] 인증번호 [{otp_code}] 입력 또는 링크({setup_link})로 비밀번호를 설정하세요."
-
-    clean_user = str(SMTP_USER).strip()
-    clean_pw = str(SMTP_PASSWORD).replace(" ", "").strip()
-
-    if ("여기에_" in clean_user) or ("여기에_" in clean_pw) or (not clean_user) or (not clean_pw):
-        return False, "app.py 상단(또는 Streamlit Secrets)의 SMTP_USER와 SMTP_PASSWORD에 실제 발신 이메일과 16자리 앱 비밀번호를 입력해 주세요."
-
-    # Gmail / 부경대 구글 워크스페이스 계정이면 서버 주소를 smtp.gmail.com 으로 자동 고정
-    if clean_user.lower().endswith(("@gmail.com", "@pukyong.ac.kr")):
-        target_server = "smtp.gmail.com"
-    else:
-        target_server = str(SMTP_SERVER).strip()
 
     action_label = "회원가입 비밀번호 설정" if purpose == "register" else "비밀번호 재설정"
     subject = f"[국립부경대 도서관] 장학사업 포털 {action_label} 안내"
@@ -484,6 +513,22 @@ def send_password_setup_email(to_email, name, token, otp_code, purpose="register
         f"국립부경대학교 도서관 드림"
     )
 
+    # 1순위: Google Apps Script 웹훅 URL이 설정된 경우 HTTPS(443)로 즉시 발송
+    if str(GAS_WEBHOOK_URL).strip().startswith("https://"):
+        return send_via_google_apps_script(to_email, subject, body)
+
+    # 2순위: 기존 SMTP 발송 (GAS_WEBHOOK_URL 미설정 시)
+    clean_user = str(SMTP_USER).strip()
+    clean_pw = str(SMTP_PASSWORD).replace(" ", "").strip()
+
+    if ("여기에_" in clean_user) or ("여기에_" in clean_pw) or (not clean_user) or (not clean_pw):
+        return False, "Streamlit Secrets에 GAS_WEBHOOK_URL(권장) 또는 SMTP 계정을 설정해 주세요."
+
+    if clean_user.lower().endswith(("@gmail.com", "@pukyong.ac.kr")):
+        target_server = "smtp.gmail.com"
+    else:
+        target_server = str(SMTP_SERVER).strip()
+
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header("국립부경대 도서관", "utf-8")), clean_user))
@@ -492,7 +537,6 @@ def send_password_setup_email(to_email, name, token, otp_code, purpose="register
     ctx = ssl.create_default_context()
     errors = []
 
-    # 1순위: SSL 465 포트
     try:
         with smtplib.SMTP_SSL(target_server, 465, timeout=15, context=ctx) as server:
             server.ehlo()
@@ -502,7 +546,6 @@ def send_password_setup_email(to_email, name, token, otp_code, purpose="register
     except Exception as e:
         errors.append(f"465(SSL): {type(e).__name__} - {e}")
 
-    # 2순위: STARTTLS 587 포트
     try:
         with smtplib.SMTP(target_server, 587, timeout=15) as server:
             server.ehlo()
@@ -1070,7 +1113,9 @@ elif page_mode == "⚙️ 관리자페이지":
                     st.success(f"학번 {del_id} 계정이 초기화되었습니다.")
                     st.rerun()
 
-            with st.expander("🧪 이메일 발송(SMTP) 설정 정상 작동 테스트"):
+            with st.expander("🧪 이메일 발송 설정 정상 작동 테스트"):
+                mode_label = "Google Apps Script (HTTPS 443)" if str(GAS_WEBHOOK_URL).strip().startswith("https://") else f"SMTP ({SMTP_SERVER})"
+                st.caption(f"현재 활성화된 발송 방식: **{mode_label}**")
                 test_email = st.text_input("테스트 메일을 받아볼 주소 입력", placeholder="본인 이메일 주소 입력")
                 if st.button("🚀 테스트 메일 1통 발송해보기"):
                     if not test_email.strip():
