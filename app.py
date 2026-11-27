@@ -2,13 +2,14 @@ import os
 import json
 import copy
 import random
+import secrets
 import hashlib
 import sqlite3
 import smtplib
 from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
-from datetime import datetime
+from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 
@@ -19,33 +20,38 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def get_secret(key, default):
+    """Streamlit Cloud Secrets가 설정되어 있으면 우선 읽고, 없으면 코드 기본값 사용"""
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return default
+
 DB_FILE = "library_scholarship.db"
-CONFIG_FILE = "library_score_config.json"
+APP_BASE_URL = get_secret("APP_BASE_URL", "https://libmileage-hlipayy4kja247wjvnthrg.streamlit.app/")
 ALLOWED_DOMAIN = "@pukyong.ac.kr"  # 화면 노출용 대표 도메인
-ALLOWED_DOMAINS = ("@pukyong.ac.kr", "@pknu.ac.kr")  # 실제 내부 허용 도메인 (비노출)
+ALLOWED_DOMAINS = ("@pukyong.ac.kr", "@pknu.ac.kr")  # 실제 내부 허용 도메인 (화면 비노출)
+ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD", "admin1234")  # 관리자 비밀번호
 
-# Streamlit Cloud의 Secrets 기능을 쓰거나 아래 변수에 직접 입력 가능
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin1234")
-
-# ==================== 이메일(SMTP) 설정 ====================
-# [중요] 실제 발송을 위해 발신용 메일 주소와 비밀번호(구글 16자리 앱 비밀번호 또는 교내 메일 비밀번호)를 입력하세요.
-# Streamlit Cloud 대시보드의 App settings -> Secrets에 등록해 두면 GitHub에 비밀번호를 노출하지 않고 안전하게 쓸 수 있습니다.
-SMTP_ENABLED = st.secrets.get("SMTP_ENABLED", True)
-SMTP_SERVER = st.secrets.get("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(st.secrets.get("SMTP_PORT", 465))  # 465(SSL) 또는 587(TLS) 모두 자동 호환됨
-SMTP_USER = st.secrets.get("SMTP_USER", "library_sender@gmail.com")
-SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "your_google_app_password_here")
+# ==================== 이메일(SMTP) 발송 설정 ====================
+# [직접 수정 위치] Streamlit Secrets를 쓰지 않을 경우, 아래 두 줄의 따옴표 안만 본인 계정으로 수정하세요.
+# 방화벽 차단을 피하기 위해 Gmail(@gmail.com) 또는 부경대 구글 계정(@pukyong.ac.kr)과 '16자리 앱 비밀번호' 사용을 권장합니다.
+SMTP_ENABLED = get_secret("SMTP_ENABLED", True)
+SMTP_SERVER = get_secret("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(get_secret("SMTP_PORT", 465))
+SMTP_USER = get_secret("SMTP_USER", "여기에_발신용_구글이메일_입력@gmail.com")
+SMTP_PASSWORD = get_secret("SMTP_PASSWORD", "여기에_구글_16자리_앱비밀번호_입력")
 
 # ==================== 국립부경대학교 전용 커스텀 CSS 테마 ====================
 st.markdown("""
 <style>
-    /* 전체 배경 및 폰트 */
     .stApp {
         background-color: #F4F7FB;
         font-family: 'Pretendard', '맑은 고딕', sans-serif;
     }
 
-    /* 사이드바 배경 및 접속화면 선택 메뉴 가시성 대폭 강화 */
     section[data-testid="stSidebar"] {
         background-color: #FFFFFF;
         border-right: 2px solid #E2E8F0;
@@ -71,7 +77,6 @@ st.markdown("""
         margin-top: 4px;
     }
 
-    /* 사이드바 라디오 버튼을 큼직한 카드형 버튼처럼 스타일링 */
     section[data-testid="stSidebar"] div[role="radiogroup"] {
         gap: 10px !important;
     }
@@ -104,7 +109,6 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    /* 상단 PKNU 히어로 배너 */
     .pknu-hero {
         background: linear-gradient(135deg, #003876 0%, #005BAC 60%, #0080C6 100%);
         padding: 26px 32px;
@@ -129,7 +133,6 @@ st.markdown("""
         margin-top: 6px;
     }
 
-    /* 핵심 KPI 요약 카드 4종 */
     .kpi-card {
         background: #FFFFFF;
         border-radius: 16px;
@@ -162,7 +165,6 @@ st.markdown("""
         margin-top: 8px;
     }
 
-    /* 섹션 타이틀 배지 */
     .section-header {
         display: flex;
         align-items: center;
@@ -173,7 +175,6 @@ st.markdown("""
         margin: 22px 0 12px 0;
     }
 
-    /* 10대 항목 비주얼 프로그레스 카드 */
     .item-card {
         background: #FFFFFF;
         border-radius: 14px;
@@ -219,7 +220,6 @@ st.markdown("""
         border-radius: 999px;
     }
 
-    /* 동점자 우선순위 배너 */
     .tie-banner {
         background: linear-gradient(90deg, #EBF3FC 0%, #F0F9FF 100%);
         border-left: 5px solid #005BAC;
@@ -232,21 +232,10 @@ st.markdown("""
         flex-wrap: wrap;
         gap: 12px;
     }
-    .tie-item {
-        text-align: center;
-    }
-    .tie-title {
-        font-size: 12px;
-        font-weight: 700;
-        color: #475569;
-    }
-    .tie-score {
-        font-size: 20px;
-        font-weight: 800;
-        color: #003876;
-    }
+    .tie-item { text-align: center; }
+    .tie-title { font-size: 12px; font-weight: 700; color: #475569; }
+    .tie-score { font-size: 20px; font-weight: 800; color: #003876; }
 
-    /* 웹페이지 하단 공식 푸터(Footer) */
     .pknu-footer {
         margin-top: 64px;
         padding: 28px 32px;
@@ -274,23 +263,13 @@ st.markdown("""
         color: #38BDF8 !important;
         font-weight: 800;
     }
-    .pknu-footer-links a:hover {
-        text-decoration: underline;
-    }
-    .pknu-footer-info {
-        color: #94A3B8;
-        font-size: 12.5px;
-    }
-    .pknu-footer-copy {
-        color: #64748B;
-        font-size: 12px;
-        margin-top: 4px;
-        font-weight: 600;
-    }
+    .pknu-footer-links a:hover { text-decoration: underline; }
+    .pknu-footer-info { color: #94A3B8; font-size: 12.5px; }
+    .pknu-footer-copy { color: #64748B; font-size: 12px; margin-top: 4px; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== DB 초기화 및 보안 함수 ====================
+# ==================== DB 초기화 및 보안·토큰 관리 함수 ====================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
@@ -301,6 +280,17 @@ def init_db():
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pw_tokens (
+            token TEXT PRIMARY KEY,
+            otp_code TEXT NOT NULL,
+            student_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            expires_at TEXT NOT NULL
         )
     """)
     conn.commit()
@@ -328,13 +318,57 @@ def save_results_to_db(df):
     df.to_sql("user_scores", conn, if_exists="replace", index=False)
     conn.close()
 
-def verify_student_identity_before_otp(student_id, name, email):
+def create_password_setup_token(student_id, name, email, purpose="register"):
+    """15분 유효한 비밀번호 설정 링크 토큰과 6자리 인증번호 동시 발급"""
+    token = secrets.token_urlsafe(24)
+    otp_code = str(random.randint(100000, 999999))
+    expires_at = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM pw_tokens WHERE student_id = ? AND purpose = ?", (student_id.strip(), purpose))
+    cur.execute(
+        "INSERT INTO pw_tokens (token, otp_code, student_id, name, email, purpose, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (token, otp_code, student_id.strip(), name.strip(), email.strip().lower(), purpose, expires_at)
+    )
+    conn.commit()
+    conn.close()
+    return token, otp_code
+
+def get_valid_token_info(token=None, student_id=None, otp_code=None, purpose=None):
+    """링크 토큰 또는 6자리 인증번호 유효성 확인"""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute("DELETE FROM pw_tokens WHERE expires_at < ?", (now_str,))
+    conn.commit()
+
+    if token:
+        cur.execute(
+            "SELECT token, otp_code, student_id, name, email, purpose, expires_at FROM pw_tokens WHERE token = ?",
+            (token.strip(),)
+        )
+    else:
+        cur.execute(
+            "SELECT token, otp_code, student_id, name, email, purpose, expires_at FROM pw_tokens WHERE student_id = ? AND otp_code = ? AND purpose = ?",
+            (student_id.strip(), otp_code.strip(), purpose)
+        )
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def delete_token(token):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("DELETE FROM pw_tokens WHERE token = ?", (token,))
+    conn.commit()
+    conn.close()
+
+def verify_student_for_register(student_id, name, email):
     sid = student_id.strip()
-    sname = name.strip()
+    sname = name.strip().replace(" ", "")
     semail = email.strip().lower()
 
-    # 내부적으로는 @pukyong.ac.kr 과 @pknu.ac.kr 모두 허용하되, 안내 문구는 @pukyong.ac.kr 만 표기
-    if not semail.endswith(ALLOWED_DOMAINS):
+    if not any(semail.endswith(domain) for domain in ALLOWED_DOMAINS):
         return False, f"반드시 '{ALLOWED_DOMAIN}'로 끝나는 국립부경대 웹메일만 사용할 수 있습니다."
 
     conn = sqlite3.connect(DB_FILE)
@@ -343,31 +377,62 @@ def verify_student_identity_before_otp(student_id, name, email):
     existing = cur.fetchone()
     conn.close()
     if existing:
-        return False, "이미 회원가입이 완료된 학번이거나 사용 중인 웹메일 주소입니다."
+        return False, "이미 회원가입이 완료된 학번이거나 사용 중인 웹메일 주소입니다. 비밀번호를 잊으셨다면 [비밀번호 재설정] 탭을 이용해 주세요."
 
     df_scores = load_results_from_db()
     if df_scores.empty:
         return False, "아직 관리자가 장학사업 대상자 명단을 업로드하지 않았습니다."
 
     matched = df_scores[
-        (df_scores["이용자ID"].astype(str) == sid) &
-        (df_scores["성명"].astype(str) == sname)
+        (df_scores["이용자ID"].astype(str).str.strip() == sid) &
+        (df_scores["성명"].astype(str).str.replace(" ", "", regex=False) == sname)
     ]
     if matched.empty:
-        return False, "입력하신 [학번 + 성명] 정보가 도서관 장학사업 집계 명단과 일치하지 않습니다. 타인의 학번으로는 가입할 수 없습니다."
+        return False, "입력하신 [학번 + 성명] 정보가 도서관 장학사업 집계 명단과 일치하지 않습니다."
 
     return True, "본인 확인 완료"
 
-def register_member(student_id, name, email, password):
+def verify_student_for_reset(student_id, name, email):
+    sid = student_id.strip()
+    sname = name.strip().replace(" ", "")
+    semail = email.strip().lower()
+
+    if not any(semail.endswith(domain) for domain in ALLOWED_DOMAINS):
+        return False, f"반드시 '{ALLOWED_DOMAIN}'로 끝나는 국립부경대 웹메일을 입력해 주세요."
+
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
+    cur.execute("SELECT student_id, name, email FROM members WHERE student_id = ?", (sid,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return False, "가입된 이력이 없는 학번입니다. 먼저 회원가입을 진행해 주세요."
+
+    db_id, db_name, db_email = row
+    if db_name.replace(" ", "") != sname or db_email.lower() != semail:
+        return False, "가입 시 등록한 성명 또는 교내 웹메일 정보와 일치하지 않습니다."
+
+    return True, "가입 정보 확인 완료"
+
+def save_member_password(student_id, name, email, password, purpose="register"):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    pw_hash = hash_password(password)
     try:
-        cur.execute(
-            "INSERT INTO members (student_id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-            (student_id.strip(), name.strip(), email.strip().lower(), hash_password(password), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        conn.commit()
-        return True, "회원가입이 완료되었습니다! [학번 로그인] 탭에서 로그인해 주세요."
+        if purpose == "reset":
+            cur.execute("UPDATE members SET password_hash = ? WHERE student_id = ?", (pw_hash, student_id.strip()))
+            if cur.rowcount == 0:
+                return False, "해당 학번 계정을 찾을 수 없습니다."
+            conn.commit()
+            return True, "비밀번호가 성공적으로 변경되었습니다! [학번 로그인] 탭에서 새 비밀번호로 로그인해 주세요."
+        else:
+            cur.execute(
+                "INSERT INTO members (student_id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                (student_id.strip(), name.strip(), email.strip().lower(), pw_hash, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            conn.commit()
+            return True, "비밀번호 설정 및 회원가입이 완료되었습니다! [학번 로그인] 탭에서 로그인해 주세요."
     except sqlite3.IntegrityError:
         return False, "이미 가입된 학번이거나 사용 중인 웹메일 주소입니다."
     finally:
@@ -384,45 +449,55 @@ def verify_login(student_id, password):
     conn.close()
     return row
 
-def send_verification_email(to_email, code):
-    """Connection unexpectedly closed 방지를 위한 SSL(465) / STARTTLS(587) 이중 자동 전환 발송"""
+def send_password_setup_email(to_email, name, token, otp_code, purpose="register"):
+    """비밀번호 설정 링크 + 6자리 인증번호를 함께 발송하는 이메일 함수 (Gmail SSL 465 / TLS 587 자동 전환)"""
+    base_url = APP_BASE_URL.rstrip("/")
+    setup_link = f"{base_url}/?pw_token={token}"
+
     if not SMTP_ENABLED:
-        return True, f"[테스트 모드] 인증번호 [{code}]를 입력해 주세요."
+        return True, f"[테스트 모드] 인증번호 [{otp_code}] 입력 또는 링크({setup_link})로 비밀번호를 설정하세요."
 
-    clean_user = SMTP_USER.strip()
-    clean_pw = SMTP_PASSWORD.replace(" ", "").strip()
+    clean_user = str(SMTP_USER).strip()
+    clean_pw = str(SMTP_PASSWORD).replace(" ", "").strip()
 
-    if clean_user == "library_sender@gmail.com" or clean_pw == "your_google_app_password_here":
-        return False, "발신용 이메일(SMTP_USER) 및 앱 비밀번호(SMTP_PASSWORD)가 아직 설정되지 않았습니다."
+    if ("여기에_" in clean_user) or ("여기에_" in clean_pw) or (not clean_user) or (not clean_pw):
+        return False, "app.py 상단(또는 Streamlit Secrets)의 SMTP_USER와 SMTP_PASSWORD에 실제 발신 이메일과 16자리 앱 비밀번호를 입력해 주세요."
 
-    msg = MIMEText(
-        f"안녕하세요.\n국립부경대학교 도서관 장학사업 실시간 점수 조회 포털 인증번호입니다.\n\n"
-        f"인증번호 6자리: [ {code} ]\n\n웹페이지로 돌아가 인증번호를 입력해 주세요.",
-        "plain", "utf-8"
+    action_label = "회원가입 비밀번호 설정" if purpose == "register" else "비밀번호 재설정"
+    subject = f"[국립부경대 도서관] 장학사업 포털 {action_label} 안내"
+    body = (
+        f"안녕하세요, {name} 님.\n"
+        f"국립부경대학교 도서관 장학사업 실시간 점수 조회 포털입니다.\n\n"
+        f"아래 두 가지 방법 중 편한 방법으로 15분 이내에 비밀번호를 설정해 주세요.\n\n"
+        f"[방법 1] 비밀번호 설정 바로가기 링크 클릭\n"
+        f"{setup_link}\n\n"
+        f"[방법 2] 열려 있는 웹페이지에 인증번호 6자리 직접 입력\n"
+        f"인증번호: [ {otp_code} ]\n\n"
+        f"※ 본인이 요청하지 않은 메일이라면 무시하셔도 됩니다.\n"
+        f"국립부경대학교 도서관 드림"
     )
-    msg["Subject"] = Header("[국립부경대 도서관] 장학사업 점수 조회 포털 웹메일 인증번호 안내", "utf-8")
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header("국립부경대 도서관", "utf-8")), clean_user))
     msg["To"] = to_email
 
-    # 1순위 시도: SSL(465 포트) 또는 설정된 포트 우선 시도 후 실패 시 반대 방식으로 자동 재시도
-    methods = ["SSL_465", "STARTTLS_587"] if SMTP_PORT == 465 else ["STARTTLS_587", "SSL_465"]
     last_error = ""
-
-    for method in methods:
+    for port, mode in [(465, "SSL"), (587, "STARTTLS")]:
         try:
-            if method == "SSL_465":
-                with smtplib.SMTP_SSL(SMTP_SERVER, 465, timeout=15) as server:
+            if mode == "SSL":
+                with smtplib.SMTP_SSL(SMTP_SERVER, port, timeout=12) as server:
                     server.ehlo()
                     server.login(clean_user, clean_pw)
                     server.send_message(msg)
             else:
-                with smtplib.SMTP(SMTP_SERVER, 587, timeout=15) as server:
+                with smtplib.SMTP(SMTP_SERVER, port, timeout=12) as server:
                     server.ehlo()
                     server.starttls()
                     server.ehlo()
                     server.login(clean_user, clean_pw)
                     server.send_message(msg)
-            return True, "입력하신 교내 웹메일로 6자리 인증번호를 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
+            return True, "입력하신 교내 웹메일로 비밀번호 설정 메일(설정 링크 및 6자리 인증번호)을 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
         except Exception as e:
             last_error = str(e)
             continue
@@ -474,6 +549,49 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ==================== 이메일 링크(?pw_token=...) 접속 시 비밀번호 설정 전용 화면 ====================
+raw_token = st.query_params.get("pw_token", None)
+if isinstance(raw_token, list):
+    raw_token = raw_token[0] if raw_token else None
+
+if raw_token:
+    token_row = get_valid_token_info(token=raw_token)
+    c_tk1, c_tk2, c_tk3 = st.columns([1, 2, 1])
+    with c_tk2:
+        if not token_row:
+            st.error("유효하지 않거나 만료된 비밀번호 설정 링크입니다. (유효시간 15분) 포털에서 다시 메일을 요청해 주세요.")
+            if st.button("🏠 로그인 화면으로 돌아가기", type="primary", use_container_width=True):
+                st.query_params.clear()
+                st.rerun()
+        else:
+            tk_val, _, tk_sid, tk_name, tk_email, tk_purpose, _ = token_row
+            title_txt = "🔐 회원가입 비밀번호 설정" if tk_purpose == "register" else "🔄 새 비밀번호 재설정"
+            st.markdown(f"### {title_txt}")
+            st.info(f"🔒 **본인 확인 완료 계정:** 학번 `{tk_sid}` | 성명 `{tk_name}`")
+
+            with st.form("link_pw_setup_form"):
+                new_pw = st.text_input("새 비밀번호 입력 (4자 이상)", type="password")
+                new_pw_chk = st.text_input("새 비밀번호 재입력", type="password")
+                save_pw_btn = st.form_submit_button("✅ 비밀번호 설정 완료", type="primary", use_container_width=True)
+
+            if save_pw_btn:
+                if len(new_pw) < 4:
+                    st.error("비밀번호는 4자 이상 입력해 주세요.")
+                elif new_pw != new_pw_chk:
+                    st.error("비밀번호가 서로 일치하지 않습니다.")
+                else:
+                    ok, msg = save_member_password(tk_sid, tk_name, tk_email, new_pw, purpose=tk_purpose)
+                    if ok:
+                        delete_token(tk_val)
+                        st.success(msg)
+                        if st.button("🔑 로그인 화면으로 이동", type="primary", use_container_width=True):
+                            st.query_params.clear()
+                            st.rerun()
+                    else:
+                        st.error(msg)
+    render_footer()
+    st.stop()
 
 # ==================== 사이드바 네비게이션 ====================
 with st.sidebar:
@@ -536,7 +654,6 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
                 cutoff_score = float(cutoff_row["최종 총점"].iloc[0]) if not cutoff_row.empty else 0.0
                 rank_badge = "🎉 장학금 수상권 진입!" if my_rank <= 38 else f"수상권(38위)까지 +{max(cutoff_score - my_score, 0):.1f}점 필요"
 
-                # 1. 상단 4대 핵심 KPI 카드
                 k1, k2, k3, k4 = st.columns(4)
                 with k1:
                     st.markdown(f"""
@@ -571,7 +688,6 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
                     </div>
                     """, unsafe_allow_html=True)
 
-                # 2. 동점자 우선순위 핵심 지표 요약 배너
                 tie1 = float(user_row.get("동점1순위(독서지원합)", float(user_row["독서클럽(점수)"]) + float(user_row["독서감상문(점수)"])))
                 tie2 = float(user_row.get("동점2순위(자료이용합)", float(user_row["단행본(점수)"]) + float(user_row["전자책(점수)"])))
                 tie3 = float(user_row.get("동점3순위(서포터즈)", float(user_row["SNS서포터즈(점수)"])))
@@ -594,7 +710,6 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 3. 10개 항목별 달성률 게이지 카드 (2열 그리드 배치)
                 st.markdown('<div class="section-header">📊 10대 평가 항목별 달성률 및 상세 실적 카탈로그</div>', unsafe_allow_html=True)
 
                 col_left, col_right = st.columns(2)
@@ -612,7 +727,6 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
                     render_item_card("✍️ 9. 독서감상문 제출", f"전체 {int(user_row['독서감상문_전체(편수)'])}편 (권장도서 {int(user_row['독서감상문_권장(편수)'])}편)", user_row["독서감상문(점수)"], 130)
                     render_item_card("📢 10. 도서관 SNS 서포터즈", f"활동 내역: {user_row['SNS서포터즈(내역)']}", user_row["SNS서포터즈(점수)"], 100)
 
-                # 4. 기존 데이터 구조를 한눈에 확인하는 원본 데이터 펼침 메뉴
                 with st.expander("📋 기존 표(Table) 형태로 전체 데이터 구조 한눈에 보기"):
                     detail_df = pd.DataFrame([
                         {"평가 항목": "1. 단행본대출", "내 실적": f"{int(user_row['단행본(권수)'])} 권", "환산 점수": user_row["단행본(점수)"], "최대 상한(Cap)": 100},
@@ -641,8 +755,13 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
                     )
 
     else:
-        auth_tab1, auth_tab2 = st.tabs(["🔑 학번 로그인", "🛡️ 국립부경대 웹메일(@pukyong.ac.kr) 인증 회원가입"])
+        auth_tab1, auth_tab2, auth_tab3 = st.tabs([
+            "🔑 학번 로그인",
+            "🛡️ 회원가입 (@pukyong.ac.kr 인증)",
+            "🔄 비밀번호 재설정 (메일 발송)"
+        ])
 
+        # 1) 학번 로그인 탭
         with auth_tab1:
             c_login1, c_login2, c_login3 = st.columns([1, 2, 1])
             with c_login2:
@@ -660,70 +779,145 @@ if page_mode == "🎓 본인 점수 확인(학생용)":
                     else:
                         st.error("학번 또는 비밀번호가 일치하지 않습니다.")
 
+        # 2) 회원가입 (비밀번호 설정 메일 발송) 탭
         with auth_tab2:
-            st.markdown("#### 🛡️ 교내 웹메일(@pukyong.ac.kr) 본인 확인 회원가입")
-            st.info("입력하신 **[학번 + 성명]**이 도서관 장학사업 집계 명단과 일치해야만 교내 웹메일(@pukyong.ac.kr)로 인증번호가 발송됩니다.")
+            st.markdown("#### 🛡️ 교내 웹메일(@pukyong.ac.kr) 인증 회원가입")
+            st.info("입력하신 **[학번 + 성명]**이 장학사업 집계 명단과 일치하면 교내 웹메일(@pukyong.ac.kr)로 **비밀번호 설정 링크 및 6자리 인증번호**가 발송됩니다.")
 
-            if "otp_code" not in st.session_state:
-                st.session_state.otp_code = None
-                st.session_state.verified_info = None
-                st.session_state.email_verified = False
+            if "reg_sent_sid" not in st.session_state:
+                st.session_state.reg_sent_sid = None
+                st.session_state.reg_verified_token = None
 
             c_r1, c_r2, c_r3 = st.columns(3)
             with c_r1:
-                reg_id = st.text_input("1. 본인 학번", placeholder="예: 20261001")
+                reg_id = st.text_input("1. 본인 학번", placeholder="예: 20261001", key="reg_id")
             with c_r2:
-                reg_name = st.text_input("2. 본인 성명", placeholder="예: 홍길동")
+                reg_name = st.text_input("2. 본인 성명", placeholder="예: 홍길동", key="reg_name")
             with c_r3:
-                reg_email = st.text_input("3. 교내 웹메일(@pukyong.ac.kr)", placeholder="example@pukyong.ac.kr")
+                reg_email = st.text_input("3. 교내 웹메일(@pukyong.ac.kr)", placeholder="example@pukyong.ac.kr", key="reg_email")
 
-            if st.button("📨 실명 확인 및 웹메일 인증번호 발송", use_container_width=True):
-                ok_id, msg_id = verify_student_identity_before_otp(reg_id, reg_name, reg_email)
+            if st.button("📨 본인 확인 및 비밀번호 설정 메일 발송", use_container_width=True):
+                ok_id, msg_id = verify_student_for_register(reg_id, reg_name, reg_email)
                 if not ok_id:
                     st.error(msg_id)
                 else:
-                    code = str(random.randint(100000, 999999))
-                    st.session_state.otp_code = code
-                    st.session_state.verified_info = (reg_id.strip(), reg_name.strip(), reg_email.strip().lower())
-                    st.session_state.email_verified = False
-                    ok_mail, msg_mail = send_verification_email(reg_email.strip().lower(), code)
+                    token, otp_code = create_password_setup_token(reg_id, reg_name, reg_email, purpose="register")
+                    ok_mail, msg_mail = send_password_setup_email(reg_email.strip().lower(), reg_name.strip(), token, otp_code, purpose="register")
                     if ok_mail:
+                        st.session_state.reg_sent_sid = reg_id.strip()
+                        st.session_state.reg_verified_token = None
                         st.success(msg_mail)
                     else:
                         st.error(msg_mail)
 
-            if st.session_state.otp_code and not st.session_state.email_verified:
+            if st.session_state.reg_sent_sid and not st.session_state.reg_verified_token:
+                st.caption("메일 안의 **비밀번호 설정 링크**를 클릭하거나, 아래에 **6자리 인증번호**를 직접 입력해 진행할 수 있습니다.")
                 c_v1, c_v2 = st.columns([3, 1])
                 with c_v1:
-                    input_otp = st.text_input("웹메일로 수신한 6자리 인증번호 입력", max_chars=6)
+                    input_otp = st.text_input("웹메일로 수신한 6자리 인증번호 입력", max_chars=6, key="reg_otp")
                 with c_v2:
                     st.write("")
                     st.write("")
-                    if st.button("✔️ 인증번호 확인", use_container_width=True):
-                        if input_otp.strip() == st.session_state.otp_code:
-                            st.session_state.email_verified = True
-                            st.success("✅ 본인 인증 완료! 아래 비밀번호를 설정해 주세요.")
+                    if st.button("✔️ 인증번호 확인", use_container_width=True, key="reg_otp_btn"):
+                        row = get_valid_token_info(student_id=st.session_state.reg_sent_sid, otp_code=input_otp, purpose="register")
+                        if row:
+                            st.session_state.reg_verified_token = row
+                            st.success("✅ 본인 인증 완료! 아래에서 비밀번호를 설정해 주세요.")
                         else:
-                            st.error("인증번호가 일치하지 않습니다.")
+                            st.error("인증번호가 일치하지 않거나 만료되었습니다.")
 
-            if st.session_state.email_verified and st.session_state.verified_info:
-                v_id, v_name, v_email = st.session_state.verified_info
+            if st.session_state.reg_verified_token:
+                tk_val, _, v_id, v_name, v_email, _, _ = st.session_state.reg_verified_token
                 st.markdown("---")
                 st.write(f"🔒 **인증 완료 계정:** 학번 `{v_id}` | 성명 `{v_name}`")
                 with st.form("final_reg_form"):
-                    reg_pw = st.text_input("사용할 비밀번호 입력", type="password")
+                    reg_pw = st.text_input("사용할 비밀번호 입력 (4자 이상)", type="password")
                     reg_pw_chk = st.text_input("비밀번호 재입력", type="password")
-                    reg_submit = st.form_submit_button("🎉 회원가입 완료", type="primary", use_container_width=True)
+                    reg_submit = st.form_submit_button("🎉 비밀번호 설정 및 회원가입 완료", type="primary", use_container_width=True)
 
                 if reg_submit:
-                    if not reg_pw or reg_pw != reg_pw_chk:
-                        st.error("비밀번호가 비어있거나 서로 일치하지 않습니다.")
+                    if len(reg_pw) < 4:
+                        st.error("비밀번호는 4자 이상 입력해 주세요.")
+                    elif reg_pw != reg_pw_chk:
+                        st.error("비밀번호가 서로 일치하지 않습니다.")
                     else:
-                        ok, msg = register_member(v_id, v_name, v_email, reg_pw)
+                        ok, msg = save_member_password(v_id, v_name, v_email, reg_pw, purpose="register")
                         if ok:
+                            delete_token(tk_val)
                             st.success(msg)
-                            st.session_state.otp_code = None
-                            st.session_state.email_verified = False
+                            st.session_state.reg_sent_sid = None
+                            st.session_state.reg_verified_token = None
+                        else:
+                            st.error(msg)
+
+        # 3) 비밀번호 재설정 (메일 발송) 탭
+        with auth_tab3:
+            st.markdown("#### 🔄 비밀번호 분실 시 재설정 메일 발송")
+            st.info("가입하신 **학번, 성명, 교내 웹메일(@pukyong.ac.kr)**을 입력하시면 비밀번호를 새로 설정할 수 있는 메일을 보내드립니다.")
+
+            if "rst_sent_sid" not in st.session_state:
+                st.session_state.rst_sent_sid = None
+                st.session_state.rst_verified_token = None
+
+            c_rs1, c_rs2, c_rs3 = st.columns(3)
+            with c_rs1:
+                rst_id = st.text_input("1. 가입한 학번", placeholder="예: 20261001", key="rst_id")
+            with c_rs2:
+                rst_name = st.text_input("2. 성명", placeholder="예: 홍길동", key="rst_name")
+            with c_rs3:
+                rst_email = st.text_input("3. 가입한 교내 웹메일(@pukyong.ac.kr)", placeholder="example@pukyong.ac.kr", key="rst_email")
+
+            if st.button("📧 비밀번호 재설정 메일 발송", use_container_width=True):
+                ok_rst, msg_rst = verify_student_for_reset(rst_id, rst_name, rst_email)
+                if not ok_rst:
+                    st.error(msg_rst)
+                else:
+                    token, otp_code = create_password_setup_token(rst_id, rst_name, rst_email, purpose="reset")
+                    ok_mail, msg_mail = send_password_setup_email(rst_email.strip().lower(), rst_name.strip(), token, otp_code, purpose="reset")
+                    if ok_mail:
+                        st.session_state.rst_sent_sid = rst_id.strip()
+                        st.session_state.rst_verified_token = None
+                        st.success(msg_mail)
+                    else:
+                        st.error(msg_mail)
+
+            if st.session_state.rst_sent_sid and not st.session_state.rst_verified_token:
+                st.caption("메일 안의 **비밀번호 설정 링크**를 클릭하거나, 아래에 **6자리 인증번호**를 입력해 새 비밀번호를 설정할 수 있습니다.")
+                c_rv1, c_rv2 = st.columns([3, 1])
+                with c_rv1:
+                    rst_otp = st.text_input("웹메일로 수신한 6자리 인증번호 입력", max_chars=6, key="rst_otp")
+                with c_rv2:
+                    st.write("")
+                    st.write("")
+                    if st.button("✔️ 인증번호 확인", use_container_width=True, key="rst_otp_btn"):
+                        row = get_valid_token_info(student_id=st.session_state.rst_sent_sid, otp_code=rst_otp, purpose="reset")
+                        if row:
+                            st.session_state.rst_verified_token = row
+                            st.success("✅ 본인 인증 완료! 새 비밀번호를 입력해 주세요.")
+                        else:
+                            st.error("인증번호가 일치하지 않거나 만료되었습니다.")
+
+            if st.session_state.rst_verified_token:
+                tk_val, _, v_id, v_name, v_email, _, _ = st.session_state.rst_verified_token
+                st.markdown("---")
+                st.write(f"🔒 **재설정 대상 계정:** 학번 `{v_id}` | 성명 `{v_name}`")
+                with st.form("final_reset_form"):
+                    new_pw = st.text_input("새 비밀번호 입력 (4자 이상)", type="password")
+                    new_pw_chk = st.text_input("새 비밀번호 재입력", type="password")
+                    rst_submit = st.form_submit_button("✅ 새 비밀번호 저장", type="primary", use_container_width=True)
+
+                if rst_submit:
+                    if len(new_pw) < 4:
+                        st.error("비밀번호는 4자 이상 입력해 주세요.")
+                    elif new_pw != new_pw_chk:
+                        st.error("비밀번호가 서로 일치하지 않습니다.")
+                    else:
+                        ok, msg = save_member_password(v_id, v_name, v_email, new_pw, purpose="reset")
+                        if ok:
+                            delete_token(tk_val)
+                            st.success(msg)
+                            st.session_state.rst_sent_sid = None
+                            st.session_state.rst_verified_token = None
                         else:
                             st.error(msg)
 
@@ -742,8 +936,7 @@ elif page_mode == "⚙️ 관리자페이지":
                 adm_submit = st.form_submit_button("🔑 관리자 로그인", type="primary", use_container_width=True)
 
             if adm_submit:
-                clean_pwd = pwd.strip()
-                if clean_pwd == ADMIN_PASSWORD:
+                if pwd.strip() == ADMIN_PASSWORD:
                     st.session_state.admin_logged_in = True
                     st.rerun()
                 else:
@@ -762,7 +955,6 @@ elif page_mode == "⚙️ 관리자페이지":
         df_members = pd.read_sql("SELECT student_id AS 학번, name AS 성명, email AS 인증웹메일, created_at AS 가입일시 FROM members", conn)
         conn.close()
 
-        # 관리자 상단 요약 KPI 카드
         if not df_saved.empty:
             total_cnt = len(df_saved)
             avg_scr = float(df_saved["최종 총점"].mean())
@@ -783,7 +975,7 @@ elif page_mode == "⚙️ 관리자페이지":
         t1, t2, t3 = st.tabs([
             "⚡ 1. 로컬 실행파일(.exe) 결과 엑셀 간편 연동",
             "📊 2. 실시간 순위 대시보드 및 게이지 표",
-            "👥 3. 가입 학생 계정 관리"
+            "👥 3. 가입 학생 계정 및 비밀번호 메일 관리"
         ])
 
         with t1:
@@ -833,14 +1025,50 @@ elif page_mode == "⚙️ 관리자페이지":
             st.markdown(f"#### 👥 가입 완료 학생 명단 (총 {len(df_members)}명)")
             st.dataframe(df_members, use_container_width=True, hide_index=True)
 
-            del_id = st.text_input("초기화할 학생의 학번 입력")
-            if st.button("🗑️ 해당 학번 계정 초기화(삭제)"):
-                conn = sqlite3.connect(DB_FILE)
-                conn.execute("DELETE FROM members WHERE student_id = ?", (del_id.strip(),))
-                conn.commit()
-                conn.close()
-                st.success(f"학번 {del_id} 계정이 초기화되었습니다.")
-                st.rerun()
+            st.markdown("---")
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                st.markdown("##### 📧 학생에게 비밀번호 재설정 메일 직접 발송")
+                reset_target_id = st.text_input("비밀번호 재설정 메일을 보낼 학번 입력", key="adm_rst_id")
+                if st.button("📨 해당 학생에게 비밀번호 재설정 메일 발송", use_container_width=True):
+                    conn = sqlite3.connect(DB_FILE)
+                    cur = conn.cursor()
+                    cur.execute("SELECT student_id, name, email FROM members WHERE student_id = ?", (reset_target_id.strip(),))
+                    target_row = cur.fetchone()
+                    conn.close()
+                    if not target_row:
+                        st.error("가입된 회원 목록에서 해당 학번을 찾을 수 없습니다.")
+                    else:
+                        t_sid, t_name, t_email = target_row
+                        token, otp_code = create_password_setup_token(t_sid, t_name, t_email, purpose="reset")
+                        ok_mail, msg_mail = send_password_setup_email(t_email, t_name, token, otp_code, purpose="reset")
+                        if ok_mail:
+                            st.success(f"✅ {t_name}({t_sid}) 학생의 등록 메일로 비밀번호 재설정 메일을 발송했습니다.")
+                        else:
+                            st.error(msg_mail)
+
+            with col_m2:
+                st.markdown("##### 🗑️ 학생 계정 초기화(삭제)")
+                del_id = st.text_input("초기화할 학생의 학번 입력", key="adm_del_id")
+                if st.button("🗑️ 해당 학번 계정 초기화(삭제)", use_container_width=True):
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("DELETE FROM members WHERE student_id = ?", (del_id.strip(),))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"학번 {del_id} 계정이 초기화되었습니다.")
+                    st.rerun()
+
+            with st.expander("🧪 이메일 발송(SMTP) 설정 정상 작동 테스트"):
+                test_email = st.text_input("테스트 메일을 받아볼 주소 입력", placeholder="본인 이메일 주소 입력")
+                if st.button("🚀 테스트 메일 1통 발송해보기"):
+                    if not test_email.strip():
+                        st.warning("수신할 이메일 주소를 입력해 주세요.")
+                    else:
+                        ok_t, msg_t = send_password_setup_email(test_email.strip(), "담당자", "TEST_TOKEN_SAMPLE", "123456", purpose="reset")
+                        if ok_t:
+                            st.success(f"✅ 테스트 메일 발송 성공! ({test_email.strip()} 메일함을 확인해 보세요)")
+                        else:
+                            st.error(msg_t)
 
 # ==================== 전체 화면 최하단 공식 푸터 렌더링 ====================
 render_footer()
