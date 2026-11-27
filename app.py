@@ -1,4 +1,5 @@
 import os
+import ssl
 import json
 import copy
 import random
@@ -36,8 +37,8 @@ ALLOWED_DOMAINS = ("@pukyong.ac.kr", "@pknu.ac.kr")  # 실제 내부 허용 도�
 ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD", "admin1234")  # 관리자 비밀번호
 
 # ==================== 이메일(SMTP) 발송 설정 ====================
-# [직접 수정 위치] Streamlit Secrets를 쓰지 않을 경우, 아래 두 줄의 따옴표 안만 본인 계정으로 수정하세요.
-# 방화벽 차단을 피하기 위해 Gmail(@gmail.com) 또는 부경대 구글 계정(@pukyong.ac.kr)과 '16자리 앱 비밀번호' 사용을 권장합니다.
+# Streamlit Cloud의 Secrets에 등록하면 GitHub에 비밀번호를 노출하지 않고 안전하게 발송할 수 있습니다.
+# Secrets를 사용하지 않을 경우에만 아래 두 줄의 따옴표 안을 실제 발신 계정과 16자리 앱 비밀번호로 수정하세요.
 SMTP_ENABLED = get_secret("SMTP_ENABLED", True)
 SMTP_SERVER = get_secret("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(get_secret("SMTP_PORT", 465))
@@ -450,7 +451,7 @@ def verify_login(student_id, password):
     return row
 
 def send_password_setup_email(to_email, name, token, otp_code, purpose="register"):
-    """비밀번호 설정 링크 + 6자리 인증번호를 함께 발송하는 이메일 함수 (Gmail SSL 465 / TLS 587 자동 전환)"""
+    """SSL 컨텍스트 보강 및 465/587 상세 진단 로그 포함 메일 발송 함수"""
     base_url = APP_BASE_URL.rstrip("/")
     setup_link = f"{base_url}/?pw_token={token}"
 
@@ -462,6 +463,12 @@ def send_password_setup_email(to_email, name, token, otp_code, purpose="register
 
     if ("여기에_" in clean_user) or ("여기에_" in clean_pw) or (not clean_user) or (not clean_pw):
         return False, "app.py 상단(또는 Streamlit Secrets)의 SMTP_USER와 SMTP_PASSWORD에 실제 발신 이메일과 16자리 앱 비밀번호를 입력해 주세요."
+
+    # Gmail / 부경대 구글 워크스페이스 계정이면 서버 주소를 smtp.gmail.com 으로 자동 고정
+    if clean_user.lower().endswith(("@gmail.com", "@pukyong.ac.kr")):
+        target_server = "smtp.gmail.com"
+    else:
+        target_server = str(SMTP_SERVER).strip()
 
     action_label = "회원가입 비밀번호 설정" if purpose == "register" else "비밀번호 재설정"
     subject = f"[국립부경대 도서관] 장학사업 포털 {action_label} 안내"
@@ -480,29 +487,34 @@ def send_password_setup_email(to_email, name, token, otp_code, purpose="register
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header("국립부경대 도서관", "utf-8")), clean_user))
-    msg["To"] = to_email
+    msg["To"] = to_email.strip()
 
-    last_error = ""
-    for port, mode in [(465, "SSL"), (587, "STARTTLS")]:
-        try:
-            if mode == "SSL":
-                with smtplib.SMTP_SSL(SMTP_SERVER, port, timeout=12) as server:
-                    server.ehlo()
-                    server.login(clean_user, clean_pw)
-                    server.send_message(msg)
-            else:
-                with smtplib.SMTP(SMTP_SERVER, port, timeout=12) as server:
-                    server.ehlo()
-                    server.starttls()
-                    server.ehlo()
-                    server.login(clean_user, clean_pw)
-                    server.send_message(msg)
-            return True, "입력하신 교내 웹메일로 비밀번호 설정 메일(설정 링크 및 6자리 인증번호)을 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
-        except Exception as e:
-            last_error = str(e)
-            continue
+    ctx = ssl.create_default_context()
+    errors = []
 
-    return False, f"이메일 발송 중 오류가 발생했습니다: {last_error}"
+    # 1순위: SSL 465 포트
+    try:
+        with smtplib.SMTP_SSL(target_server, 465, timeout=15, context=ctx) as server:
+            server.ehlo()
+            server.login(clean_user, clean_pw)
+            server.send_message(msg)
+        return True, "입력하신 교내 웹메일로 비밀번호 설정 메일(설정 링크 및 6자리 인증번호)을 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
+    except Exception as e:
+        errors.append(f"465(SSL): {type(e).__name__} - {e}")
+
+    # 2순위: STARTTLS 587 포트
+    try:
+        with smtplib.SMTP(target_server, 587, timeout=15) as server:
+            server.ehlo()
+            server.starttls(context=ctx)
+            server.ehlo()
+            server.login(clean_user, clean_pw)
+            server.send_message(msg)
+        return True, "입력하신 교내 웹메일로 비밀번호 설정 메일(설정 링크 및 6자리 인증번호)을 발송했습니다. 메일함(스팸함 포함)을 확인해 주세요."
+    except Exception as e:
+        errors.append(f"587(TLS): {type(e).__name__} - {e}")
+
+    return False, f"이메일 발송 실패 [서버: {target_server} | 발신: {clean_user}] -> " + " / ".join(errors)
 
 def render_item_card(title, raw_text, score, cap):
     score_val = float(score)
